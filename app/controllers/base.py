@@ -1,3 +1,5 @@
+import os
+import secrets
 from uuid import uuid4
 
 from fastapi import Request
@@ -14,18 +16,33 @@ def get_task_id(request: Request):
 
 
 def get_api_key(request: Request):
-    api_key = request.headers.get("x-api-key")
-    return api_key
+    return request.headers.get("x-api-key")
+
+
+def configured_api_key() -> str:
+    """Prefer deployment injection; retain config.toml compatibility."""
+    environment_value = os.getenv("MPT_API_KEY", "").strip()
+    if environment_value:
+        return environment_value
+    value = config.app.get("api_key", "")
+    return value.strip() if isinstance(value, str) else ""
 
 
 def verify_token(request: Request):
-    token = get_api_key(request)
-    if token != config.app.get("api_key", ""):
-        request_id = get_task_id(request)
-        request_url = request.url
-        user_agent = request.headers.get("user-agent")
+    """Fail closed unless the request matches a non-empty configured key."""
+    request_id = get_task_id(request)
+    expected = configured_api_key()
+    if not expected:
+        raise HttpException(
+            task_id=request_id,
+            status_code=503,
+            message="API authentication is not configured",
+        )
+
+    provided = get_api_key(request)
+    if not isinstance(provided, str) or not secrets.compare_digest(provided, expected):
         raise HttpException(
             task_id=request_id,
             status_code=401,
-            message=f"invalid token: {request_url}, {user_agent}",
+            message="invalid API token",
         )
