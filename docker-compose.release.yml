@@ -37,8 +37,11 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     environment:
-      # Compose refuses to start the API unless a credential is supplied.
-      MPT_API_KEY: ${MPT_API_KEY:?Set MPT_API_KEY to a long random value}
+      # Set MPT_API_KEY explicitly for managed deployments. Fresh local Compose
+      # installs leave it empty and main.py atomically creates a persistent
+      # random key at ./storage/.mpt_api_key (mode 0600 where supported).
+      MPT_API_KEY: ${MPT_API_KEY:-}
+      MPT_API_KEY_FILE: /MoneyPrinterTurbo/storage/.mpt_api_key
       # Containers must listen on their interface; host publishing remains
       # loopback-only and every privileged route requires X-API-Key.
       MPT_LISTEN_HOST: 0.0.0.0
