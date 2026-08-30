@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from app.config import config
+from app.controllers import base
 from app.models.exception import HttpException
 from app.router import root_api_router
 from app.utils import utils
@@ -32,29 +33,24 @@ async def application_lifespan(_: FastAPI):
         logger.info("shutdown event")
 
 
-def exception_handler(request: Request, e: HttpException):
+def exception_handler(request: Request, error: HttpException):
     return JSONResponse(
-        status_code=e.status_code,
-        content=utils.get_response(e.status_code, e.data, e.message),
+        status_code=error.status_code,
+        content=utils.get_response(error.status_code, error.data, error.message),
     )
 
 
-def validation_exception_handler(request: Request, e: RequestValidationError):
+def validation_exception_handler(request: Request, error: RequestValidationError):
     return JSONResponse(
         status_code=400,
         content=utils.get_response(
-            status=400, data=e.errors(), message="field required"
+            status=400, data=error.errors(), message="field required"
         ),
     )
 
 
 def get_application() -> FastAPI:
-    """Initialize FastAPI application.
-
-    Returns:
-       FastAPI: Application object instance.
-
-    """
+    """Initialize the authenticated API application."""
     instance = FastAPI(
         title=config.project_name,
         description=config.project_description,
@@ -70,21 +66,45 @@ def get_application() -> FastAPI:
 
 app = get_application()
 
-# Configures the CORS middleware for the FastAPI app
-cors_allowed_origins_str = os.getenv("CORS_ALLOWED_ORIGINS", "")
-origins = cors_allowed_origins_str.split(",") if cors_allowed_origins_str else ["*"]
+# Browser access is local-only by default. Operators exposing the API through a
+# separate origin must name it explicitly rather than inheriting wildcard CORS.
+configured_origins = [
+    value.strip()
+    for value in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+    if value.strip()
+]
+origins = configured_origins or [
+    "http://127.0.0.1:8080",
+    "http://localhost:8080",
+    "http://127.0.0.1:8501",
+    "http://localhost:8501",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Range", "X-API-Key", "X-Task-ID"],
 )
+
+
+@app.middleware("http")
+async def protect_task_artifacts(request: Request, call_next):
+    """Apply the same API credential to files served under /tasks."""
+    if request.url.path == "/tasks" or request.url.path.startswith("/tasks/"):
+        try:
+            base.verify_token(request)
+        except HttpException as error:
+            return exception_handler(request, error)
+    return await call_next(request)
+
 
 task_dir = utils.task_dir()
 app.mount(
-    "/tasks", StaticFiles(directory=task_dir, html=True, follow_symlink=True), name=""
+    "/tasks",
+    StaticFiles(directory=task_dir, html=False, follow_symlink=False),
+    name="tasks",
 )
 
 public_dir = utils.public_dir()
-app.mount("/", StaticFiles(directory=public_dir, html=True), name="")
+app.mount("/", StaticFiles(directory=public_dir, html=True), name="public")
