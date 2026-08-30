@@ -1,3 +1,4 @@
+import os
 import secrets
 from uuid import uuid4
 
@@ -19,6 +20,10 @@ def get_api_key(request: Request):
 
 
 def configured_api_key() -> str:
+    """Prefer deployment injection; retain config.toml compatibility."""
+    environment_value = os.getenv("MPT_API_KEY", "").strip()
+    if environment_value:
+        return environment_value
     value = config.app.get("api_key", "")
     return value.strip() if isinstance(value, str) else ""
 
