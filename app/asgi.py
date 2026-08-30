@@ -90,8 +90,11 @@ app.add_middleware(
 
 @app.middleware("http")
 async def protect_task_artifacts(request: Request, call_next):
-    """Apply the same API credential to files served under /tasks."""
-    if request.url.path == "/tasks" or request.url.path.startswith("/tasks/"):
+    """Authenticate task files while leaving browser preflights to CORS."""
+    task_path = request.url.path == "/tasks" or request.url.path.startswith(
+        "/tasks/"
+    )
+    if task_path and request.method != "OPTIONS":
         try:
             base.verify_token(request)
         except HttpException as error:
